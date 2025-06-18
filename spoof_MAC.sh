@@ -40,7 +40,7 @@ elif [[ "$CHOICE" -ge 1 && "$CHOICE" -lt "$i" ]]; then
     VENDOR_OUIS=(${OUIS[$SELECTED_VENDOR]})
     OUI=${VENDOR_OUIS[$RANDOM % ${#VENDOR_OUIS[@]}]}
 else
-    echo "❌ Invalid selection. Exiting."
+    echo "Invalid selection. Exiting."
     exit 1
 fi
 
