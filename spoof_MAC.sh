@@ -1,5 +1,12 @@
 #!/bin/bash
 
+echo " __  __ _______ __  __ "
+echo "|  \/  |__   __|  \/  | "
+echo "| \  / |  | |  | \  / |"
+echo "| |\/| |  | |  | |\/| |"
+echo "| |  | |  | |  | |  | |"
+echo "|_|  |_|  |_|  |_|  |_|"
+ 
 declare -A OUIS
 OUIS=(
     [Apple]="00:17:F2 D4:F4:6F A4:5E:60 48:3C:0C F4:F1:5A"
@@ -11,6 +18,17 @@ OUIS=(
     [Microsoft]="00:03:FF 00:15:5D"
     [QEMU]="52:54:00"
     [Google]="3C:5A:B4 94:EB:CD 54:60:09"
+    [ASUS]="00:1C:23 AC:22:0B B4:AE:2B"
+    [Lenovo]="00:0A:E4"
+    [Realtek]="00:E0:4C"
+    [TP-Link]="50:C7:BF"
+    [Broadcom]="00:10:18"
+    [Gigabyte]="74:D0:2B"
+    [Xiaomi]="64:09:80"
+    [ASRock]="00:1C:42"
+    [Tenda]="D8:15:0D"
+    [HP]="3C:D9:2B"
+    [Foxconn]="00:1E:64"
 )
 
 echo "Interfaces réseau détectées :"
