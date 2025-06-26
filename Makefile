@@ -5,4 +5,3 @@ all:
 
 clean:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
-	rm -f spoof_disk_serial.ko spoof_disk_serial.mod.c spoof_disk_serial.mod spoof_disk_serial.o
