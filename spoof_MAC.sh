@@ -1,15 +1,10 @@
 #!/bin/bash
 
-BLUE='\033[1;34m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${BLUE} __  __ _______ __  __ "
-echo -e "|  \\/  |__   __|  \\/  | "
-echo -e "| \\  / |  | |  | \\  / |"
-echo -e "| |\\/| |  | |  | |\\/| |"
-echo -e "| |  | |  | |  | |  | |"
-echo -e "|_|  |_|  |_|  |_|  |_|${NC}"
- 
+MODULE="spoof_disk_serial.ko"
+
 declare -A OUIS
 OUIS=(
     [Apple]="00:17:F2 D4:F4:6F A4:5E:60 48:3C:0C F4:F1:5A"
@@ -48,6 +43,32 @@ OUIS=(
     [Oppo]="AC:67:B2 3C:BD:3D"
 )
 
+function check_module() {
+  [[ ! -f "$MODULE" ]] && { echo "Building kernel module..."; make || { echo "Build failed!"; exit 1; }; }
+}
+
+function rand_mac_tail() {
+  hexdump -n 3 -e '/1 ":%02X"' /dev/urandom | sed 's/^://'
+}
+
+function pick_mac_vendor() {
+  echo "Choose a MAC vendor prefix for realism:"
+  for i in "${!MAC_OUIS[@]}"; do
+    echo "$((i+1))) ${MAC_OUIS[$i]}"
+  done
+  echo "$(( ${#MAC_OUIS[@]}+1 ))) Random MAC (private)"
+  read -p "Select [1-$((${#MAC_OUIS[@]}+1))]: " mac_choice
+  if [[ $mac_choice -ge 1 && $mac_choice -le ${#MAC_OUIS[@]} ]]; then
+    vendor_prefix=$(echo "${MAC_OUIS[$((mac_choice-1))]}" | awk '{print $1}')
+    mac="$vendor_prefix$(rand_mac_tail)"
+    echo "$mac"
+  else
+    mac="02$(od -An -N5 -tx1 /dev/urandom | tr -d " \n" | sed 's/\(..\)/:\1/g; s/^://')"
+    echo "$mac"
+  fi
+}
+
+function spoof_mac() {
 echo "Interfaces réseau détectées :"
 mapfile -t INTERFACES < <(ip -o link show | awk -F': ' '{print $2}' | grep -v "lo")
 
@@ -60,7 +81,7 @@ done
 read -p "Choisissez une interface à modifier [1-${#INTERFACES[@]}]: " IFACE_INDEX
 
 if [[ $IFACE_INDEX -lt 1 || $IFACE_INDEX -gt ${#INTERFACES[@]} ]]; then
-    echo "Choix invalide. Sortie."
+    echo -e "${RED}Choix invalide. Sortie.${NC}"
     exit 1
 fi
 
@@ -83,7 +104,7 @@ read -p "Votre choix [1-$i] : " VENDOR_CHOICE
 if [[ "$VENDOR_CHOICE" -eq "$i" ]]; then
     read -p "Entrez un OUI personnalisé (format XX:XX:XX) : " CUSTOM_OUI
     if ! [[ $CUSTOM_OUI =~ ^([A-Fa-f0-9]{2}:){2}[A-Fa-f0-9]{2}$ ]]; then
-        echo "Format OUI invalide. Sortie."
+        echo -e "${RED}Format OUI invalide. Sortie.${NC}"
         exit 1
     fi
     OUI="$CUSTOM_OUI"
@@ -92,7 +113,7 @@ elif [[ "$VENDOR_CHOICE" -ge 1 && "$VENDOR_CHOICE" -lt "$i" ]]; then
     VENDOR_OUIS=(${OUIS[$SELECTED_VENDOR]})
     OUI=${VENDOR_OUIS[$RANDOM % ${#VENDOR_OUIS[@]}]}
 else
-    echo "Sélection invalide. Sortie."
+    echo -e "${RED}Sélection invalide. Sortie.${NC}"
     exit 1
 fi
 
@@ -108,4 +129,76 @@ sudo ip link set dev "$NETIF" address "$MACADDR"
 sudo ip link set dev "$NETIF" up
 
 echo "Adresse MAC changée avec succès."
+}
 
+function spoof_disk_serial() {
+  check_module
+  echo "---- Disk Devices ----"
+  lsblk -dno NAME,SIZE -e 7 | nl
+  read -p "Number to spoof: " dnum
+  DEV=$(lsblk -dno NAME -e 7 | sed -n "${dnum}p")
+  [[ -z "$DEV" ]] && { echo "Invalid disk selection!"; return; }
+  read -p "Randomize serial (Y/n)? " rserial
+  if [[ $rserial =~ ^[Yy]$|^$ ]]; then
+    SERIAL=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+    echo "Generated serial: $SERIAL"
+  else
+    read -p "Enter custom serial: " SERIAL
+  fi
+  sudo rmmod spoof_disk_serial 2>/dev/null
+  sudo insmod $MODULE serial="$SERIAL" device="$DEV" && echo "Spoofed /dev/$DEV!"
+}
+
+function remove_disk_spoof() {
+  sudo rmmod spoof_disk_serial 2>/dev/null && echo "Disk serial spoof removed!"
+}
+
+function spoof_all_uuid() {
+  echo "---- Filesystem UUIDs (ext2/3/4 only) ----"
+  for part in $(lsblk -lnpo NAME,TYPE | awk '$2=="part"{print $1}'); do
+    fs=$(blkid -o value -s TYPE "$part" 2>/dev/null)
+    [[ "$fs" =~ ext[234] ]] || continue
+    sudo tune2fs -U random "$part" && echo "$part UUID => randomized"
+  done
+}
+
+function spoof_hostname() {
+  NEW_HOST=$(tr -dc a-z0-9 </dev/urandom | head -c 8)
+  sudo hostnamectl set-hostname "$NEW_HOST"
+  echo "Hostname set to $NEW_HOST (relog may be needed)."
+}
+
+function show_status() {
+  echo "-- Disk Serial Spoof: --"
+  lsmod | grep spoof_disk_serial && sudo dmesg | tail -n 10 | grep disk-serial-spoofer
+  echo "-- MAC addresses: --"
+  ip link | awk '/link\/ether/ {print $2,$9}'
+  echo "-- Hostname: --"
+  hostnamectl status | grep "Static hostname"
+  echo "-- Filesystem UUIDs (first 10): --"
+  lsblk -lnpo NAME | head -10 | xargs -I{} blkid {} 2>/dev/null | grep UUID
+}
+
+while true; do
+  echo
+  echo "========== HWID Spoofer Menu =========="
+  echo "1) Spoof disk serial !MAINTENANCE! (kernel mod, random/custom)"
+  echo "2) Spoof MAC address (pick vendor, randomize)"
+  echo "3) Randomize all ext2/3/4 UUIDs"
+  echo "4) Randomize hostname"
+  echo "5) Show current spoofed info"
+  echo "6) Remove disk serial spoof"
+  echo "7) Exit"
+  echo "======================================="
+  read -p "Select an option [1-7]: " opt
+  case $opt in
+    1) spoof_disk_serial ;;
+    2) spoof_mac ;;
+    3) spoof_all_uuid ;;
+    4) spoof_hostname ;;
+    5) show_status ;;
+    6) remove_disk_spoof ;;
+    7) exit 0 ;;
+    *) echo "Invalid option" ;;
+  esac
+done
