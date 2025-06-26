@@ -1,9 +1,17 @@
 #!/bin/bash
 
+BLUE='\033[1;34m'
 RED='\033[0;31m'
 NC='\033[0m'
 
 MODULE="spoof_disk_serial.ko"
+
+echo -e "${BLUE} __  __ _______ __  __ "
+echo -e "|  \\/  |__   __|  \\/  | "
+echo -e "| \\  / |  | |  | \\  / |"
+echo -e "| |\\/| |  | |  | |\\/| |"
+echo -e "| |  | |  | |  | |  | |"
+echo -e "|_|  |_|  |_|  |_|  |_|${NC}"
 
 declare -A OUIS
 OUIS=(
