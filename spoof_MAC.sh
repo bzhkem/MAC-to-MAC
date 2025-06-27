@@ -8,7 +8,18 @@ BLUE='\033[1;34m'
 CYAN='\033[1;36m'
 NC='\033[0m'
 
-#===================== VENDOR MAC OUIS ===================#
+#======================== HEADER =========================#
+echo -e "${BLUE}"
+echo " __  __ _______ __  __ "
+echo "|  \/  |__   __|  \/  |   HWID Spoofer"
+echo "| \  / |  | |  | \  / |   (Disk/MAC/UUID/Host)"
+echo "| |\/| |  | |  | |\/| |"
+echo "| |  | |  | |  | |  | |     github.com/bzhkem/MAC-to-MAC"
+echo "|_|  |_|  |_|  |_|  |_|"
+echo -e "${NC}"
+echo -e "${CYAN}MTM - Machine Trace Modifier${NC}"
+
+#====================== OUI VENDORS ======================#
 declare -A OUIS=(
     [Apple]="00:17:F2 D4:F4:6F A4:5E:60 48:3C:0C F4:F1:5A"
     [Intel]="00:1B:21 3C:97:0E 00:13:E8"
@@ -28,16 +39,6 @@ declare -A OUIS=(
     [Samsung]="00:12:3F 00:16:32 00:19:5B"
     [RaspberryPi]="B8:27:EB DC:A6:32"
 )
-
-#======================== HEADER =========================#
-echo -e "${BLUE}"
-echo " __  __ _______ __  __ "
-echo "|  \/  |__   __|  \/  |   HWID Spoofer"
-echo "| \  / |  | |  | \  / |   (Disk/MAC/UUID/Host)"
-echo "| |\/| |  | |  | |\/| |"
-echo "| |  | |  | |  | |  | |     github.com/bzhkem/MAC-to-MAC"
-echo "|_|  |_|  |_|  |_|  |_|"
-echo -e "${NC}"
 
 MODULE="spoof_disk_serial.ko"
 
@@ -101,13 +102,28 @@ function spoof_mac() {
     echo -e "${GREEN}[✓] $IFACE MAC changed to $MAC${NC}"
 }
 
-#======================= FILESYSTEM UUIDS ==========================#
-function spoof_all_uuids() {
+#============= FILESYSTEM UUIDs WITH AUTO E2FSCK ==============#
+function spoof_all_uuid() {
     echo -e "${CYAN}Randomizing UUIDs for all ext2/3/4 partitions...${NC}"
-    for p in $(lsblk -lnpo NAME,TYPE | awk '$2=="part"{print $1}'); do
-        f=$(blkid -o value -s TYPE "$p" 2>/dev/null)
-        [[ "$f" =~ ext[234] ]] && sudo tune2fs -U random "$p" && \
-        echo -e "${GREEN}[$p] UUID randomized.${NC}"
+    for part in $(lsblk -lnpo NAME,TYPE | awk '$2=="part"{print $1}'); do
+        fstype=$(blkid -o value -s TYPE "$part" 2>/dev/null)
+        [[ "$fstype" =~ ext[234] ]] || continue
+
+        mountpoint=$(lsblk -no MOUNTPOINT "$part")
+        if [[ -n "$mountpoint" ]]; then
+            # Don't change UUID on mounted partitions!
+            echo -e "${YELLOW}[!] Partition $part is mounted on $mountpoint -- skipping.${NC}"
+            continue
+        fi
+
+        echo -e "${CYAN}[*] Running e2fsck on $part...${NC}"
+        sudo e2fsck -y -f "$part"
+        if [[ $? -eq 0 ]]; then
+            sudo tune2fs -U random "$part" && \
+            echo -e "${GREEN}[✓] $part UUID randomized.${NC}"
+        else
+            echo -e "${RED}[!] e2fsck failed on $part. Skipping UUID change.${NC}"
+        fi
     done
 }
 
@@ -147,7 +163,7 @@ while true; do
     case $opt in
         1) spoof_disk_serial ;;
         2) spoof_mac ;;
-        3) spoof_all_uuids ;;
+        3) spoof_all_uuid ;;
         4) spoof_hostname ;;
         5) show_status ;;
         6) remove_disk_spoof ;;
