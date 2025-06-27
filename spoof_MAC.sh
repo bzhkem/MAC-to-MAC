@@ -113,11 +113,26 @@ function spoof_mac() {
 
 #==================== SPOOF UUIDs ====================#
 function spoof_all_uuid() {
-    echo -e "${CYAN}[*] UUIDs randomisés (ext2/3/4)${NC}"
-    for p in $(lsblk -lnpo NAME,TYPE | awk '$2=="part"{print $1}'); do
-        f=$(blkid -o value -s TYPE "$p" 2>/dev/null)
-        [[ "$f" =~ ext[234] ]] && sudo tune2fs -U random "$p" && \
-        echo -e "${GREEN}[✓] $p => UUID changé${NC}"
+    echo -e "${CYAN}Randomizing UUIDs for all ext2/3/4 partitions...${NC}"
+    for part in $(lsblk -lnpo NAME,TYPE | awk '$2=="part"{print $1}'); do
+        fstype=$(blkid -o value -s TYPE "$part" 2>/dev/null)
+        [[ "$fstype" =~ ext[234] ]] || continue
+
+        mountpoint=$(lsblk -no MOUNTPOINT "$part")
+        if [[ -n "$mountpoint" ]]; then
+            # Don't change UUID on mounted partitions!
+            echo -e "${YELLOW}[!] Partition $part is mounted on $mountpoint -- skipping.${NC}"
+            continue
+        fi
+
+        echo -e "${CYAN}[*] Running e2fsck on $part...${NC}"
+        sudo e2fsck -y -f "$part"
+        if [[ $? -eq 0 ]]; then
+            sudo tune2fs -U random "$part" && \
+            echo -e "${GREEN}[✓] $part UUID randomized.${NC}"
+        else
+            echo -e "${RED}[!] e2fsck failed on $part. Skipping UUID change.${NC}"
+        fi
     done
 }
 
