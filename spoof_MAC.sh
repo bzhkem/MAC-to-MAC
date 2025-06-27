@@ -11,10 +11,10 @@ NC='\033[0m'
 #======================== HEADER ========================#
 echo -e "${BLUE}"
 echo " __  __ _______ __  __ "
-echo "|  \/  |__   __|  \/  |"
-echo "| \  / |  | |  | \  / |"
+echo "|  \/  |__   __|  \/  |   HWID Spoofer"
+echo "| \  / |  | |  | \  / |   (Disk/MAC/UUID/Host)"
 echo "| |\/| |  | |  | |\/| |"
-echo "| |  | |  | |  | |  | |"
+echo "| |  | |  | |  | |  | |     github.com/bzhkem/MAC-to-MAC"
 echo "|_|  |_|  |_|  |_|  |_|"
 echo -e "${NC}"
 echo -e "${CYAN}MTM - Machine Trace Modifier${NC}"
