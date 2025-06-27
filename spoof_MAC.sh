@@ -1,17 +1,25 @@
 #!/bin/bash
-# Auteur : Bzhkem - MTM (Machine Trace Modifier) - v2.0
-# Description : Outil professionnel de spoofing disque/MAC/UUID/hostname avec interface TUI
 
-set -euo pipefail
-IFS=$'\n\t'
+#======================== COLORS ========================#
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+CYAN='\033[1;36m'
+NC='\033[0m'
 
-# === CONFIG ===
-MODULE="spoof_disk_serial.ko"
-LOGFILE="/var/log/mtm.log"
-CONFIG_FILE="/etc/mtm.conf"
-VERBOSE=0
-DRY_RUN=0
+#======================== HEADER ========================#
+echo -e "${BLUE}"
+echo " __  __ _______ __  __ "
+echo "|  \/  |__   __|  \/  |"
+echo "| \  / |  | |  | \  / |"
+echo "| |\/| |  | |  | |\/| |"
+echo "| |  | |  | |  | |  | |"
+echo "|_|  |_|  |_|  |_|  |_|"
+echo -e "${NC}"
+echo -e "${CYAN}MTM - Machine Trace Modifier${NC}"
 
+#====================== OUI VENDORS ======================#
 declare -A OUIS=(
     [Apple]="00:17:F2 D4:F4:6F A4:5E:60 48:3C:0C F4:F1:5A"
     [Synology]="00:11:32 00:15:88 00:1B:57"
@@ -49,298 +57,118 @@ declare -A OUIS=(
     [Oppo]="AC:67:B2 3C:BD:3D"
 )
 
-# === Colors ===
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[1;34m'
-NC='\033[0m'
+MODULE="spoof_disk_serial.ko"
 
-# === Logging ===
-function log() {
-    local msg="$1"
-    echo "$(date '+%F %T') - $msg" >> "$LOGFILE"
-    (( VERBOSE )) && echo -e "$msg"
-}
-
-# === Check root ===
-function check_root() {
-    if [[ $EUID -ne 0 ]]; then
-        dialog --msgbox "Ce script doit être lancé en root." 6 40
-        exit 1
-    fi
-}
-
-# === Check dependencies ===
-function check_dependencies() {
-    for cmd in dialog make lsblk blkid tune2fs ip; do
-        if ! command -v $cmd &>/dev/null; then
-            dialog --msgbox "La commande '$cmd' est requise mais absente. Installez-la." 7 50
-            exit 1
-        fi
-    done
-}
-
-# === Banner ===
-function banner() {
-    clear
-    echo -e "${BLUE}"
-    echo " __  __ _______ __  __     __  __ _____ _____ "
-    echo "|  \/  |__   __|  \/  |   |  \/  |_   _|  __ \\"
-    echo "| \\  / |  | |  | \\  / |   | \\  / | | | | |__) |"
-    echo "| |\\/| |  | |  | |\\/| |   | |\\/| | | | |  ___/"
-    echo "| |  | |  | |  | |  | |   | |  | |_| |_| |    "
-    echo "|_|  |_|  |_|  |_|  |_|   |_|  |_|_____|_|    "
-    echo "             Machine Trace Modifier (MTM)"
-    echo -e "${NC}"
-}
-
-# === Load config file if exists ===
-function load_config() {
-    if [[ -f "$CONFIG_FILE" ]]; then
-        # shellcheck source=/dev/null
-        source "$CONFIG_FILE"
-        log "[Config] Loaded config file $CONFIG_FILE"
-    fi
-}
-
-# === Check module and compile if missing ===
+#==================== CHECK MODULE =====================#
 function check_module() {
-    if [[ ! -f "$MODULE" ]]; then
-        log "[*] Module $MODULE introuvable, compilation en cours..."
-        make || {
-            dialog --msgbox "Erreur compilation module kernel." 7 40
-            log "[ERROR] Compilation module kernel échouée."
-            exit 1
-        }
-        log "[✓] Compilation réussie."
-    fi
-}
-
-# === Load kernel module ===
-function load_module() {
-    local serial=$1
-    local device=$2
-
-    if lsmod | grep -q spoof_disk_serial; then
-        if ! dialog --yesno "Le module est déjà chargé. Voulez-vous le décharger avant ?" 7 50; then
-            return 1
-        fi
-        sudo rmmod spoof_disk_serial
-        log "[*] Module spoof_disk_serial déchargé."
-    fi
-
-    if (( DRY_RUN )); then
-        dialog --msgbox "DRY-RUN: Chargement module avec serial='$serial' sur device='$device' (non appliqué)" 8 60
-        log "[DRY RUN] Chargement module spoof_disk_serial (serial=$serial device=$device)"
-        return 0
-    fi
-
-    sudo insmod "$MODULE" serial="$serial" device="$device" && {
-        dialog --msgbox "Module chargé avec succès sur /dev/$device (serial=$serial)" 7 60
-        log "[✓] Module chargé: /dev/$device serial=$serial"
-        return 0
-    } || {
-        dialog --msgbox "Erreur lors du chargement du module." 7 40
-        log "[ERROR] Chargement module échoué"
-        return 1
+    [[ ! -f "$MODULE" ]] && { 
+        echo -e "${YELLOW}[!] Compilation du module...${NC}"
+        make || { echo -e "${RED}[ERREUR] Compilation échouée.${NC}"; exit 1; }
     }
 }
 
-# === Menu: spoof disk serial ===
+#=================== SPOOF DISK SERIAL ===================#
 function spoof_disk_serial() {
     check_module
-    local devices
-    devices=($(lsblk -dno NAME,SIZE -e 7))
-    local menu_list=()
-    local idx=1
-    for dev in "${devices[@]}"; do
-        menu_list+=("$idx" "$dev")
-        ((idx++))
-    done
+    echo -e "${CYAN}[*] Disques détectés :${NC}"
+    lsblk -dno NAME,SIZE -e 7 | nl
+    read -p "Sélectionnez le disque (numéro) : " dnum
+    DEV=$(lsblk -dno NAME -e 7 | sed -n "${dnum}p")
+    [[ -z "$DEV" ]] && { echo -e "${RED}[!] Disque invalide.${NC}"; return; }
 
-    local choice
-    choice=$(dialog --menu "Sélectionnez un disque:" 15 50 6 "${menu_list[@]}" 3>&1 1>&2 2>&3) || return
-
-    local device=$(echo "${devices[$((choice-1))]}" | awk '{print $1}')
-    if [[ -z "$device" ]]; then
-        dialog --msgbox "Disque invalide sélectionné." 6 40
-        return
-    fi
-
-    local serial
-    if dialog --yesno "Voulez-vous générer un numéro de série aléatoire ?" 7 50; then
-        serial=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
+    read -p "Randomiser le serial ? (Y/n): " r
+    if [[ $r =~ ^[Yy]$|^$ ]]; then
+        SERIAL=$(tr -dc A-Za-z0-9 </dev/urandom | head -c 16)
     else
-        serial=$(dialog --inputbox "Entrez un numéro de série personnalisé (16 caractères max):" 8 60 3>&1 1>&2 2>&3)
-        [[ -z "$serial" ]] && { dialog --msgbox "Numéro de série invalide." 6 40; return; }
+        read -p "Entrer le serial personnalisé : " SERIAL
     fi
 
-    load_module "$serial" "$device"
+    sudo rmmod spoof_disk_serial 2>/dev/null
+    sudo insmod $MODULE serial="$SERIAL" device="$DEV" && \
+    echo -e "${GREEN}[✓] Spoof appliqué à /dev/$DEV => $SERIAL${NC}"
 }
 
-# === Menu: spoof MAC ===
+#===================== SPOOF MAC ======================#
 function spoof_mac() {
-    local ifaces=()
-    mapfile -t ifaces < <(ip -o link show | awk -F': ' '{print $2}' | grep -v lo)
-    local menu_list=()
-    local idx=1
-    for iface in "${ifaces[@]}"; do
-        menu_list+=("$idx" "$iface")
-        ((idx++))
-    done
+    echo -e "${CYAN}[*] Interfaces réseau disponibles :${NC}"
+    mapfile -t IFACES < <(ip -o link show | awk -F': ' '{print $2}' | grep -v lo)
+    for i in "${!IFACES[@]}"; do echo "$((i+1))) ${IFACES[i]}"; done
+    read -p "Choix interface [1-${#IFACES[@]}]: " i
+    IFACE="${IFACES[$((i-1))]}"
 
-    local choice
-    choice=$(dialog --menu "Sélectionnez une interface réseau:" 15 50 6 "${menu_list[@]}" 3>&1 1>&2 2>&3) || return
-    local iface="${ifaces[$((choice-1))]}"
+    echo -e "${CYAN}[*] Sélection constructeur (OUI) :${NC}"
+    k=1
+    for vendor in "${!OUIS[@]}"; do echo "$k) $vendor"; ((k++)); done
+    read -p "Choix [1-${#OUIS[@]}]: " j
+    OUI_KEY=("${!OUIS[@]}")
+    PREFIX="${OUIS[${OUI_KEY[$((j-1))]}]}"
 
-    local oui_keys=("${!OUIS[@]}")
-    local oui_menu=()
-    idx=1
-    for key in "${oui_keys[@]}"; do
-        oui_menu+=("$idx" "$key")
-        ((idx++))
-    done
-
-    local oui_choice
-    oui_choice=$(dialog --menu "Sélectionnez un constructeur OUI:" 15 50 6 "${oui_menu[@]}" 3>&1 1>&2 2>&3) || return
-    local prefix="${OUIS[${oui_keys[$((oui_choice-1))]}]}"
-
-    local random_part
-    random_part=$(hexdump -n 3 -e '/1 ":%02X"' /dev/urandom)
-    local mac="$prefix$random_part"
-
-    if (( DRY_RUN )); then
-        dialog --msgbox "DRY-RUN: MAC $iface changé en $mac (non appliqué)" 7 60
-        log "[DRY RUN] Spoof MAC $iface => $mac"
-        return
-    fi
-
-    sudo ip link set "$iface" down
-    sudo ip link set "$iface" address "$mac"
-    sudo ip link set "$iface" up
-
-    dialog --msgbox "MAC spoofée sur $iface : $mac" 7 50
-    log "[✓] Spoof MAC $iface => $mac"
+    RANDOM_PART=$(hexdump -n 3 -e '/1 ":%02X"' /dev/urandom)
+    MAC="${PREFIX}${RANDOM_PART}"
+    sudo ip link set "$IFACE" down
+    sudo ip link set "$IFACE" address "$MAC"
+    sudo ip link set "$IFACE" up
+    echo -e "${GREEN}[✓] MAC de $IFACE changée => $MAC${NC}"
 }
 
-# === Menu: spoof UUID ext2/3/4 ===
+#==================== SPOOF UUIDs ====================#
 function spoof_all_uuid() {
-    local parts=()
-    mapfile -t parts < <(lsblk -lnpo NAME,TYPE | awk '$2=="part"{print $1}')
-
-    local changed=0
-    for p in "${parts[@]}"; do
-        local fstype
-        fstype=$(blkid -o value -s TYPE "$p" 2>/dev/null || echo "")
-        if [[ "$fstype" =~ ext[234] ]]; then
-            if (( DRY_RUN )); then
-                log "[DRY RUN] UUID randomisé sur $p"
-            else
-                sudo tune2fs -U random "$p"
-                changed=1
-                log "[✓] UUID randomisé sur $p"
-            fi
-        fi
+    echo -e "${CYAN}[*] UUIDs randomisés (ext2/3/4)${NC}"
+    for p in $(lsblk -lnpo NAME,TYPE | awk '$2=="part"{print $1}'); do
+        f=$(blkid -o value -s TYPE "$p" 2>/dev/null)
+        [[ "$f" =~ ext[234] ]] && sudo tune2fs -U random "$p" && \
+        echo -e "${GREEN}[✓] $p => UUID changé${NC}"
     done
-
-    if (( changed == 0 )) && (( DRY_RUN == 0 )); then
-        dialog --msgbox "Aucune partition ext2/3/4 détectée pour modification." 7 50
-    else
-        dialog --msgbox "UUIDs randomisés avec succès." 7 40
-    fi
 }
 
-# === Menu: change hostname ===
+#==================== SPOOF HOSTNAME ===================#
 function spoof_hostname() {
-    local newhost
-    newhost=$(tr -dc a-z0-9 </dev/urandom | head -c 8)
-
-    if (( DRY_RUN )); then
-        dialog --msgbox "DRY-RUN: Nouveau hostname = $newhost (non appliqué)" 7 50
-        log "[DRY RUN] Hostname changé en $newhost"
-        return
-    fi
-
-    sudo hostnamectl set-hostname "$newhost"
-    dialog --msgbox "Hostname modifié en : $newhost" 7 40
-    log "[✓] Hostname modifié => $newhost"
+    NEW=$(tr -dc a-z0-9 </dev/urandom | head -c 8)
+    sudo hostnamectl set-hostname "$NEW"
+    echo -e "${GREEN}[✓] Hostname changé => $NEW${NC}"
 }
 
-# === Menu: retirer spoof disque ===
+#==================== REMOVE DISK SPOOF ================#
 function remove_disk_spoof() {
-    if ! lsmod | grep -q spoof_disk_serial; then
-        dialog --msgbox "Le module spoof_disk_serial n'est pas chargé." 6 50
-        return
-    fi
-
-    if dialog --yesno "Confirmez-vous le retrait du spoof disque ?" 7 50; then
-        if (( DRY_RUN )); then
-            dialog --msgbox "DRY-RUN: Module spoof_disk_serial retiré (non appliqué)" 7 50
-            log "[DRY RUN] Retrait module spoof_disk_serial"
-            return
-        fi
-        sudo rmmod spoof_disk_serial
-        dialog --msgbox "Module spoof_disk_serial retiré avec succès." 7 50
-        log "[✓] Module spoof_disk_serial retiré"
-    else
-        dialog --msgbox "Suppression annulée." 5 40
-    fi
+    sudo rmmod spoof_disk_serial && echo -e "${GREEN}[✓] Spoof disque retiré.${NC}"
 }
 
-# === Afficher état actuel ===
+#==================== SHOW STATUS =======================#
 function show_status() {
-    local mod_state
-    mod_state=$(lsmod | grep spoof || echo "(aucun module spoof chargé)")
-
-    local ifaces
-    ifaces=$(ip -brief link | grep -v lo)
-
-    local hostname
-    hostname=$(hostname)
-
-    local uuids
-    uuids=$(blkid | grep UUID | head -n 5 || echo "Aucune partition détectée")
-
-    dialog --msgbox "Modules chargés:\n$mod_state\n\nInterfaces réseau:\n$ifaces\n\nHostname:\n$hostname\n\nUUIDs (extrait):\n$uuids" 20 70
+    echo -e "${YELLOW}-- État actuel --${NC}"
+    echo -e "${CYAN}Modules actifs:${NC}"
+    lsmod | grep spoof
+    echo -e "${CYAN}Interfaces réseau:${NC}"
+    ip -brief link | grep -v lo
+    echo -e "${CYAN}Hostname:${NC}"
+    hostname
+    echo -e "${CYAN}UUIDs (partitions):${NC}"
+    blkid | grep UUID | head -n 5
 }
 
-# === Menu principal ===
-function main_menu() {
-    while true; do
-        local choice
-        choice=$(dialog --clear --title "MTM - Machine Trace Modifier" \
-            --menu "Choisissez une action :" 15 60 8 \
-            1 "Spoof Disk Serial" \
-            2 "Spoof MAC Address" \
-            3 "Spoof All ext2/3/4 UUIDs" \
-            4 "Change Hostname" \
-            5 "Remove Disk Spoof Module" \
-            6 "Show Status" \
-            7 "Toggle Dry Run Mode (Current: $([ $DRY_RUN -eq 1 ] && echo ON || echo OFF))" \
-            0 "Exit" 3>&1 1>&2 2>&3) || break
+#====================== MAIN MENU =======================#
+while true; do
+    echo -e "\n${BLUE}========= MENU MTM =========${NC}"
+    echo "1) Spoof Disque (Serial)"
+    echo "2) Spoof Adresse MAC"
+    echo "3) Randomiser UUID (ext2/3/4)"
+    echo "4) Modifier le Hostname"
+    echo "5) État actuel"
+    echo "6) Retirer spoof disque"
+    echo "7) Quitter"
+    echo -e "${BLUE}============================${NC}"
+    read -p "Choix [1-7]: " opt
+    case $opt in
+        1) spoof_disk_serial ;;
+        2) spoof_mac ;;
+        3) spoof_all_uuid ;;
+        4) spoof_hostname ;;
+        5) show_status ;;
+        6) remove_disk_spoof ;;
+        7) exit 0 ;;
+        *) echo -e "${RED}[!] Choix invalide${NC}" ;;
+    esac
+    sleep 1
 
-        case "$choice" in
-            1) spoof_disk_serial ;;
-            2) spoof_mac ;;
-            3) spoof_all_uuid ;;
-            4) spoof_hostname ;;
-            5) remove_disk_spoof ;;
-            6) show_status ;;
-            7) 
-                ((DRY_RUN = 1 - DRY_RUN))
-                dialog --msgbox "Mode Dry Run: $([ $DRY_RUN -eq 1 ] && echo ON || echo OFF)" 6 40
-                ;;
-            0) break ;;
-            *) dialog --msgbox "Option invalide." 5 40 ;;
-        esac
-    done
-}
+done
 
-# === MAIN ===
-check_root
-check_dependencies
-load_config
-banner
-main_menu
-clear
